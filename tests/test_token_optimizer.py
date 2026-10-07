@@ -70,6 +70,12 @@ class InputLine(unittest.TestCase):
                   "    /compress    Sitzung verdichten\n────────\n❯ /clear\n────────\n")
         self.assertEqual(to.input_line(screen), "/clear")
 
+    def test_dim_suggestion_is_not_input(self):
+        real = ('\x1b[38;2;102;102;102m\x1b[48;2;240;240;240m\x1b[22m❯\x1b[39m \x1b[38;2;0;0;0m/compress\x1b[39m\n'
+                '\x1b[m❯\xa0\x1b[39m\x1b[49m\x1b[22m\x1b[24m\x1b[2m\x1b[23m/clear\n')
+        self.assertEqual(to.input_line(real), "")
+        self.assertEqual(to.input_line("\x1b[m❯\xa0\x1b[22m/clear\n"), "/clear")
+
     def test_empty_input(self):
         self.assertEqual(to.input_line("● hi\n────\n❯ \n────\n"), "")
 
@@ -106,6 +112,16 @@ class Chain(Base):
         # failed chain does not retry in the same session
         to.on_stop(self.hook(to.THRESHOLD))
         self.assertEqual(self.typed, ["/compress"])
+
+    def test_unchanged_next_md_ok_when_compress_says_done(self):
+        (self.work / "NEXT.md").write_text("old")
+        os.utime(self.work / "NEXT.md", (time.time() - 3600,) * 2)
+        to.on_stop(self.hook(to.THRESHOLD))
+        answer = json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "Nichts Neues.\n\n→ Jetzt /clear eingeben."}]}})
+        self.write_transcript(usage_line(to.THRESHOLD), answer)
+        to.on_stop({"session_id": "a", "transcript_path": str(self.transcript), "cwd": str(self.work)})
+        self.assertEqual(self.typed, ["/compress", "/clear"])
 
     def test_outside_zellij_nothing_is_typed(self):
         with mock.patch.dict(os.environ, {"ZELLIJ_PANE_ID": ""}):

@@ -54,6 +54,8 @@ TYPE_DELAY = 2.0
 # How long to wait for the typed command to show up on screen before Enter.
 TYPE_SETTLE = 4.0
 NEXT_MAX_CHARS = 12000
+# Closing line of the compress skill (skills/compress/SKILL.md, section 3).
+COMPRESS_DONE = "Jetzt /clear eingeben"
 # Stop hook: how long to wait for the final answer to reach the transcript.
 STOP_WAIT = 5.0
 
@@ -119,6 +121,32 @@ def settled_context_tokens(transcript: str, wait: float = STOP_WAIT) -> int:
         if not pending or time.time() > deadline:
             return tokens
         time.sleep(0.2)
+
+
+def last_answer(data: dict) -> str:
+    """Text of the turn's final answer. Newer Claude Code passes it to the
+    Stop hook; otherwise read the last main-thread answer from the transcript."""
+    if data.get("last_assistant_message"):
+        return str(data["last_assistant_message"])
+    text = ""
+    try:
+        with open(data.get("transcript_path") or "", encoding="utf-8") as fh:
+            for line in fh:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                if o.get("type") != "assistant" or o.get("isSidechain"):
+                    continue
+                parts = [c.get("text", "") for c in (o.get("message") or {}).get("content") or []
+                         if isinstance(c, dict) and c.get("type") == "text"]
+                if parts:
+                    text = "\n".join(parts)
+    except OSError:
+        pass
+    return text
 
 
 def find_next(cwd: Path) -> Path | None:
@@ -192,15 +220,47 @@ def zellij(session: str, *args: str) -> str:
     return out.stdout
 
 
+ANSI = re.compile(r"\x1b\[([0-9;]*)m|\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def visible_text(line: str) -> str:
+    """Plain text of an ANSI line without the dimmed parts: Claude Code shows
+    its prompt suggestion as dim ghost text in the input box, which is not
+    typed input."""
+    out, dim, pos = [], False, 0
+    for m in ANSI.finditer(line):
+        if not dim:
+            out.append(line[pos:m.start()])
+        pos = m.end()
+        if m.group(1) is None:
+            continue
+        codes = m.group(1).split(";") if m.group(1) else ["0"]
+        i = 0
+        while i < len(codes):
+            c = codes[i]
+            if c in ("38", "48", "58"):  # colour arguments are not attributes
+                i += 5 if codes[i + 1:i + 2] == ["2"] else 3
+                continue
+            if c == "2":
+                dim = True
+            elif c in ("0", "22"):
+                dim = False
+            i += 1
+    if not dim:
+        out.append(line[pos:])
+    return "".join(out)
+
+
 def input_line(screen: str) -> str:
-    """Content of Claude Code's input box: the LAST line starting with the
-    prompt sign. Counting occurrences of the command on screen does not work:
-    the slash-command menu opens while typing and pushes older mentions
-    (e.g. "→ Jetzt /clear eingeben.") out of the viewport. The menu marks its
-    selected entry with the same sign, but always above the input box."""
+    """Content of Claude Code's input box (screen dumped with ANSI codes): the
+    LAST line starting with the prompt sign. Counting occurrences of the
+    command on screen does not work: the slash-command menu opens while typing
+    and pushes older mentions (e.g. "→ Jetzt /clear eingeben.") out of the
+    viewport. The menu marks its selected entry with the same sign, but always
+    above the input box."""
     last = ""
     for line in screen.splitlines():
-        s = line.strip()
+        s = visible_text(line).replace("\xa0", " ").strip()
         if s[:1] in ("❯", ">"):
             last = s[1:].strip()
     return last
@@ -212,14 +272,14 @@ def type_command(session: str, pane_id: str, text: str, delay: float = TYPE_DELA
     `-p terminal_N` is accepted by write-chars and silently types nowhere."""
     time.sleep(delay)
     try:
-        pending = input_line(zellij(session, "dump-screen", "-p", pane_id))
+        pending = input_line(zellij(session, "dump-screen", "-a", "-p", pane_id))
         if pending:
             # Someone is typing (or a draft is parked): appending would mangle both.
             log(f"{session}/{pane_id}: input box not empty, {text} not typed")
             return False
         zellij(session, "write-chars", "-p", pane_id, "--", text)
         deadline = time.time() + TYPE_SETTLE
-        while input_line(zellij(session, "dump-screen", "-p", pane_id)) != text:
+        while input_line(zellij(session, "dump-screen", "-a", "-p", pane_id)) != text:
             if time.time() > deadline:
                 log(f"{session}/{pane_id}: {text} not visible after typing, no Enter sent")
                 return False
@@ -246,7 +306,10 @@ def on_stop(data: dict) -> dict | None:
         # This Stop ends the /compress turn: only clear if NEXT.md was written,
         # otherwise the fresh session would have nothing to continue from.
         nxt = find_next(Path(data.get("cwd") or os.getcwd()))
-        if nxt and nxt.stat().st_mtime >= st["at"]:
+        fresh = nxt and nxt.stat().st_mtime >= st["at"]
+        # An unchanged NEXT.md is fine when /compress says it is done: it only
+        # rewrites the file when there is something new to record.
+        if nxt and (fresh or COMPRESS_DONE in last_answer(data)):
             save_state(p, phase="clear", session_id=sid, next_md=str(nxt))
             spawn_typer(p, "/clear")
             return None
