@@ -48,6 +48,16 @@ class ContextTokens(Base):
         self.write_transcript(usage_line(1000), usage_line(5000), usage_line(99999, sidechain=True))
         self.assertEqual(to.context_tokens(str(self.transcript)), 5000)
 
+    def test_pending_until_answer_written(self):
+        user = json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}})
+        self.write_transcript(usage_line(5000), user)
+        self.assertEqual(to.scan_context(str(self.transcript)), (5000, True))
+        self.write_transcript(usage_line(5000), user, usage_line(7000))
+        self.assertEqual(to.scan_context(str(self.transcript)), (7000, False))
+        # gives up after the wait instead of blocking the hook
+        self.write_transcript(user)
+        self.assertEqual(to.settled_context_tokens(str(self.transcript), wait=0.3), 0)
+
     def test_compact_boundary_resets(self):
         self.write_transcript(usage_line(400000), json.dumps(
             {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"postTokens": 20000}}))

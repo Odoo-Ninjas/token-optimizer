@@ -54,6 +54,8 @@ TYPE_DELAY = 2.0
 # How long to wait for the typed command to show up on screen before Enter.
 TYPE_SETTLE = 4.0
 NEXT_MAX_CHARS = 12000
+# Stop hook: how long to wait for the final answer to reach the transcript.
+STOP_WAIT = 5.0
 
 
 def home() -> Path:
@@ -76,11 +78,13 @@ def log(msg: str) -> None:
 
 # --- Measuring ---------------------------------------------------------------
 
-def context_tokens(transcript: str) -> int:
-    tokens = 0
+def scan_context(transcript: str) -> tuple[int, bool]:
+    """Context size and whether a user line came after the last measured
+    answer (i.e. the answer to it is not in the transcript yet)."""
+    tokens, pending = 0, False
     with open(transcript, encoding="utf-8") as fh:
         for line in fh:
-            if '"usage"' not in line and "compact_boundary" not in line:
+            if '"usage"' not in line and "compact_boundary" not in line and '"user"' not in line:
                 continue
             try:
                 o = json.loads(line)
@@ -88,15 +92,33 @@ def context_tokens(transcript: str) -> int:
                 continue
             if o.get("isSidechain"):
                 continue
-            if o.get("type") == "system" and o.get("subtype") == "compact_boundary":
+            if o.get("type") == "user":
+                pending = True
+            elif o.get("type") == "system" and o.get("subtype") == "compact_boundary":
                 tokens = (o.get("compactMetadata") or {}).get("postTokens") or 0
             elif o.get("type") == "assistant":
                 u = (o.get("message") or {}).get("usage") or {}
                 total = (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0) \
                     + (u.get("cache_creation_input_tokens") or 0)
                 if total:
-                    tokens = total
-    return tokens
+                    tokens, pending = total, False
+    return tokens, pending
+
+
+def context_tokens(transcript: str) -> int:
+    return scan_context(transcript)[0]
+
+
+def settled_context_tokens(transcript: str, wait: float = STOP_WAIT) -> int:
+    """Context size at the end of a turn. Claude Code fires Stop around the
+    same moment it appends the final answer (measured: the answer line can
+    land after the hook has read the file), so wait until it is there."""
+    deadline = time.time() + wait
+    while True:
+        tokens, pending = scan_context(transcript)
+        if not pending or time.time() > deadline:
+            return tokens
+        time.sleep(0.2)
 
 
 def find_next(cwd: Path) -> Path | None:
@@ -197,6 +219,7 @@ def type_command(session: str, pane_id: str, text: str, delay: float = TYPE_DELA
 def on_stop(data: dict) -> dict | None:
     p = pane()
     if not p:
+        log(f"stop {data.get('session_id')}: not in zellij, nothing to type")
         return None  # outside zellij: the prompt hook reminds instead
     st = load_state(p)
     sid = data.get("session_id")
@@ -218,7 +241,8 @@ def on_stop(data: dict) -> dict | None:
     transcript = data.get("transcript_path")
     if not transcript or not os.path.exists(transcript):
         return None
-    tokens = context_tokens(transcript)
+    tokens = settled_context_tokens(transcript)
+    log(f"{p[0]}/{p[1]}: stop, context {tokens // 1000}k, threshold {THRESHOLD // 1000}k")
     if tokens < THRESHOLD:
         return None
     save_state(p, phase="compress", session_id=sid, tokens=tokens)
