@@ -185,7 +185,8 @@ def load_state(p) -> dict | None:
         st = json.loads(state_path(p).read_text())
     except (OSError, ValueError):
         return None
-    if time.time() - st.get("at", 0) > STALE:
+    # "done" marks the session the chain just started; it does not expire.
+    if st.get("phase") != "done" and time.time() - st.get("at", 0) > STALE:
         state_path(p).unlink(missing_ok=True)
         return None
     return st
@@ -316,7 +317,8 @@ def on_stop(data: dict) -> dict | None:
         save_state(p, phase="failed", session_id=sid)
         log(f"{p[0]}/{p[1]}: /compress ended without a fresh NEXT.md, no /clear")
         return {"systemMessage": "token-optimizer: NEXT.md wurde nicht geschrieben – kein automatisches /clear."}
-    if st and st.get("session_id") == sid:
+    done = st if st and st["phase"] == "done" and st.get("session_id") == sid else None
+    if st and not done and st.get("session_id") == sid:
         return None  # chain already running or failed for this session
 
     transcript = data.get("transcript_path")
@@ -324,6 +326,16 @@ def on_stop(data: dict) -> dict | None:
         return None
     tokens = settled_context_tokens(transcript)
     log(f"{p[0]}/{p[1]}: stop, context {tokens // 1000}k, threshold {THRESHOLD // 1000}k")
+    if done:
+        # The session the chain started begins with its base context (system
+        # prompt, NEXT.md). Measure that once and only fire again after the
+        # session has grown by STEP - otherwise a base above the threshold
+        # would loop /compress -> /clear forever.
+        if done.get("base") is None:
+            save_state(p, phase="done", session_id=sid, base=tokens)
+            return None
+        if tokens < max(THRESHOLD, done["base"] + STEP):
+            return None
     if tokens < THRESHOLD:
         return None
     save_state(p, phase="compress", session_id=sid, tokens=tokens)
@@ -338,7 +350,7 @@ def on_session_start(data: dict) -> dict | None:
     p = pane()
     st = load_state(p) if p else None
     if st and st["phase"] == "clear":
-        drop_state(p)
+        save_state(p, phase="done", session_id=data.get("session_id"), base=None)
         spawn_typer(p, "/whats-next")
 
     path = find_next(Path(data.get("cwd") or os.getcwd()))
@@ -390,7 +402,8 @@ def on_prompt(data: dict) -> dict | None:
     if prompt.startswith(("/compress", "/clear", "/whats-next")):
         return None
     p = pane()
-    if p and load_state(p):
+    st = load_state(p) if p else None
+    if st and st["phase"] != "done":
         return None  # the chain is on it
     transcript = data.get("transcript_path")
     if not transcript or not os.path.exists(transcript):

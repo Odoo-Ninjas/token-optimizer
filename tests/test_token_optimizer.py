@@ -100,7 +100,14 @@ class Chain(Base):
         out = to.on_session_start({"source": "clear", "session_id": "b", "cwd": str(self.work)})
         self.assertIn("weiter", out["hookSpecificOutput"]["additionalContext"])
         self.assertEqual(self.typed, ["/compress", "/clear", "/whats-next"])
-        self.assertIsNone(to.load_state(to.pane()))
+
+        # the fresh session starts above the threshold: no loop
+        to.on_stop(self.hook(to.THRESHOLD + 10000, sid="b"))
+        to.on_stop(self.hook(to.THRESHOLD + 20000, sid="b"))
+        self.assertEqual(len(self.typed), 3)
+        # it fires again once the session has grown by STEP
+        to.on_stop(self.hook(to.THRESHOLD + 10000 + to.STEP, sid="b"))
+        self.assertEqual(self.typed[-1], "/compress")
 
     def test_no_clear_without_fresh_next_md(self):
         (self.work / "NEXT.md").write_text("old")
