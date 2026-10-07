@@ -192,16 +192,34 @@ def zellij(session: str, *args: str) -> str:
     return out.stdout
 
 
+def input_line(screen: str) -> str:
+    """Content of Claude Code's input box: the LAST line starting with the
+    prompt sign. Counting occurrences of the command on screen does not work:
+    the slash-command menu opens while typing and pushes older mentions
+    (e.g. "→ Jetzt /clear eingeben.") out of the viewport. The menu marks its
+    selected entry with the same sign, but always above the input box."""
+    last = ""
+    for line in screen.splitlines():
+        s = line.strip()
+        if s[:1] in ("❯", ">"):
+            last = s[1:].strip()
+    return last
+
+
 def type_command(session: str, pane_id: str, text: str, delay: float = TYPE_DELAY) -> bool:
     """Type a slash command and press Enter, but only once the command is
     visibly in the input box. The pane id goes in as the bare number:
     `-p terminal_N` is accepted by write-chars and silently types nowhere."""
     time.sleep(delay)
     try:
-        before = zellij(session, "dump-screen", "-p", pane_id).count(text)
+        pending = input_line(zellij(session, "dump-screen", "-p", pane_id))
+        if pending:
+            # Someone is typing (or a draft is parked): appending would mangle both.
+            log(f"{session}/{pane_id}: input box not empty, {text} not typed")
+            return False
         zellij(session, "write-chars", "-p", pane_id, "--", text)
         deadline = time.time() + TYPE_SETTLE
-        while zellij(session, "dump-screen", "-p", pane_id).count(text) <= before:
+        while input_line(zellij(session, "dump-screen", "-p", pane_id)) != text:
             if time.time() > deadline:
                 log(f"{session}/{pane_id}: {text} not visible after typing, no Enter sent")
                 return False

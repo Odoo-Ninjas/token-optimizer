@@ -64,6 +64,16 @@ class ContextTokens(Base):
         self.assertEqual(to.context_tokens(str(self.transcript)), 20000)
 
 
+class InputLine(unittest.TestCase):
+    def test_last_prompt_line_wins_over_menu(self):
+        screen = ("● Fertig.\n  → Jetzt /clear eingeben.\n\n  ❯ /clear      Start a new session\n"
+                  "    /compress    Sitzung verdichten\n────────\n❯ /clear\n────────\n")
+        self.assertEqual(to.input_line(screen), "/clear")
+
+    def test_empty_input(self):
+        self.assertEqual(to.input_line("● hi\n────\n❯ \n────\n"), "")
+
+
 class Chain(Base):
     def test_below_threshold_does_nothing(self):
         self.assertIsNone(to.on_stop(self.hook(to.THRESHOLD - 1)))
