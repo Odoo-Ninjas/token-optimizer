@@ -203,12 +203,13 @@ def drop_state(p) -> None:
 
 # --- Typing into the pane ----------------------------------------------------
 
-def spawn_typer(p, text: str) -> None:
+def spawn_typer(p, text: str, submit: bool = True) -> None:
     """Type `text` from a detached process: the hook has to return first,
     otherwise Claude Code is still busy with it when the keys arrive."""
+    cmd = "type" if submit else "put"
     with open(data_dir() / "log", "a") as out:
         subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "type", p[0], p[1], text],
+            [sys.executable, str(Path(__file__).resolve()), cmd, p[0], p[1], text],
             stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True,
         )
 
@@ -224,14 +225,13 @@ def zellij(session: str, *args: str) -> str:
 ANSI = re.compile(r"\x1b\[([0-9;]*)m|\x1b\[[0-9;?]*[A-Za-z]")
 
 
-def visible_text(line: str) -> str:
-    """Plain text of an ANSI line without the dimmed parts: Claude Code shows
-    its prompt suggestion as dim ghost text in the input box, which is not
-    typed input."""
-    out, dim, pos = [], False, 0
+def split_dim(line: str) -> tuple[str, str]:
+    """Plain text of an ANSI line, split into normal and dimmed parts: Claude
+    Code shows its prompt suggestion as dim ghost text in the input box,
+    which is not typed input."""
+    out, ghost, dim, pos = [], [], False, 0
     for m in ANSI.finditer(line):
-        if not dim:
-            out.append(line[pos:m.start()])
+        (ghost if dim else out).append(line[pos:m.start()])
         pos = m.end()
         if m.group(1) is None:
             continue
@@ -247,9 +247,12 @@ def visible_text(line: str) -> str:
             elif c in ("0", "22"):
                 dim = False
             i += 1
-    if not dim:
-        out.append(line[pos:])
-    return "".join(out)
+    (ghost if dim else out).append(line[pos:])
+    return "".join(out), "".join(ghost)
+
+
+def visible_text(line: str) -> str:
+    return split_dim(line)[0]
 
 
 def input_line(screen: str) -> str:
@@ -267,12 +270,40 @@ def input_line(screen: str) -> str:
     return last
 
 
-def type_command(session: str, pane_id: str, text: str, delay: float = TYPE_DELAY) -> bool:
+def suggestion(screen: str) -> str:
+    """Claude Code's prompt suggestion: the dim ghost text in the input box.
+    The placeholder of an empty session ('Try "…"') is dim as well, but not a
+    suggestion."""
+    ghost = ""
+    for line in screen.splitlines():
+        normal, dim = split_dim(line)
+        if normal.replace("\xa0", " ").strip()[:1] in ("❯", ">"):
+            ghost = dim.replace("\xa0", " ").strip()
+    return "" if ghost.startswith("Try \"") else ghost
+
+
+def remember_suggestion(session: str, pane_id: str) -> None:
+    """Park the current suggestion in the chain state; it is typed back once
+    /whats-next has run in the fresh session."""
+    p = (session, pane_id)
+    st = load_state(p)
+    ghost = suggestion(zellij(session, "dump-screen", "-a", "-p", pane_id))
+    if st and ghost:
+        st["suggestion"] = ghost
+        state_path(p).write_text(json.dumps(st))
+        log(f"{session}/{pane_id}: suggestion remembered")
+
+
+def type_command(session: str, pane_id: str, text: str, delay: float = TYPE_DELAY,
+                 submit: bool = True) -> bool:
     """Type a slash command and press Enter, but only once the command is
     visibly in the input box. The pane id goes in as the bare number:
-    `-p terminal_N` is accepted by write-chars and silently types nowhere."""
+    `-p terminal_N` is accepted by write-chars and silently types nowhere.
+    submit=False leaves the text in the input box."""
     time.sleep(delay)
     try:
+        if text == "/compress":
+            remember_suggestion(session, pane_id)
         pending = input_line(zellij(session, "dump-screen", "-a", "-p", pane_id))
         if pending:
             # Someone is typing (or a draft is parked): appending would mangle both.
@@ -285,6 +316,9 @@ def type_command(session: str, pane_id: str, text: str, delay: float = TYPE_DELA
                 log(f"{session}/{pane_id}: {text} not visible after typing, no Enter sent")
                 return False
             time.sleep(0.2)
+        if not submit:
+            log(f"{session}/{pane_id}: put back into the input box: {len(text)} chars")
+            return True
         zellij(session, "write", "-p", pane_id, "13")
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         log(f"{session}/{pane_id}: typing {text} failed: {exc}")
@@ -311,7 +345,8 @@ def on_stop(data: dict) -> dict | None:
         # An unchanged NEXT.md is fine when /compress says it is done: it only
         # rewrites the file when there is something new to record.
         if nxt and (fresh or COMPRESS_DONE in last_answer(data)):
-            save_state(p, phase="clear", session_id=sid, next_md=str(nxt))
+            save_state(p, phase="clear", session_id=sid, next_md=str(nxt),
+                       suggestion=st.get("suggestion"))
             spawn_typer(p, "/clear")
             return None
         save_state(p, phase="failed", session_id=sid)
@@ -333,6 +368,10 @@ def on_stop(data: dict) -> dict | None:
         # would loop /compress -> /clear forever.
         if done.get("base") is None:
             save_state(p, phase="done", session_id=sid, base=tokens)
+            # First Stop of the fresh session = /whats-next is through: put
+            # back what Claude Code suggested before /compress, unsent.
+            if done.get("suggestion"):
+                spawn_typer(p, done["suggestion"], submit=False)
             return None
         if tokens < max(THRESHOLD, done["base"] + STEP):
             return None
@@ -350,7 +389,8 @@ def on_session_start(data: dict) -> dict | None:
     p = pane()
     st = load_state(p) if p else None
     if st and st["phase"] == "clear":
-        save_state(p, phase="done", session_id=data.get("session_id"), base=None)
+        save_state(p, phase="done", session_id=data.get("session_id"), base=None,
+                   suggestion=st.get("suggestion"))
         spawn_typer(p, "/whats-next")
 
     path = find_next(Path(data.get("cwd") or os.getcwd()))
@@ -543,6 +583,9 @@ def main() -> None:
         # instead of waiting for a command that never ran.
         drop_state((args[1], args[2]))
         sys.exit(1)
+    elif args[0] == "put" and len(args) == 4:
+        # Text for the input box without Enter; nothing to undo on failure.
+        sys.exit(0 if type_command(*args[1:], submit=False) else 1)
     elif args[0] == "install":
         install()
     else:

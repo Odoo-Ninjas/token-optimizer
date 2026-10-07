@@ -24,7 +24,7 @@ class Base(unittest.TestCase):
                                                 "ZELLIJ_PANE_ID": "3"})
         self.env.start()
         self.typed = []
-        self.spawn = mock.patch.object(to, "spawn_typer", lambda p, text: self.typed.append(text))
+        self.spawn = mock.patch.object(to, "spawn_typer", lambda p, text, submit=True: self.typed.append(text if submit else ("put", text)))
         self.spawn.start()
         self.work = self.tmp / "ai" / "work" / "T-1"
         self.work.mkdir(parents=True)
@@ -76,6 +76,11 @@ class InputLine(unittest.TestCase):
         self.assertEqual(to.input_line(real), "")
         self.assertEqual(to.input_line("\x1b[m❯\xa0\x1b[22m/clear\n"), "/clear")
 
+    def test_suggestion_is_the_dim_part(self):
+        screen = ('\x1b[m❯\xa0\x1b[22m\x1b[2mmach weiter mit den Tests\n')
+        self.assertEqual(to.suggestion(screen), "mach weiter mit den Tests")
+        self.assertEqual(to.suggestion('\x1b[m❯\xa0\x1b[2mTry "fix lint errors"\n'), "")
+
     def test_empty_input(self):
         self.assertEqual(to.input_line("● hi\n────\n❯ \n────\n"), "")
 
@@ -89,6 +94,10 @@ class Chain(Base):
         out = to.on_stop(self.hook(to.THRESHOLD))
         self.assertIn("/compress", out["systemMessage"])
         self.assertEqual(self.typed, ["/compress"])
+        # the typer parks Claude Code's suggestion in the state before /compress
+        st = to.load_state(to.pane())
+        st["suggestion"] = "mach weiter"
+        to.state_path(to.pane()).write_text(json.dumps(st))
 
         # /compress turn ends with a fresh NEXT.md -> /clear
         time.sleep(0.01)
@@ -103,8 +112,9 @@ class Chain(Base):
 
         # the fresh session starts above the threshold: no loop
         to.on_stop(self.hook(to.THRESHOLD + 10000, sid="b"))
+        self.assertEqual(self.typed[-1], ("put", "mach weiter"))
         to.on_stop(self.hook(to.THRESHOLD + 20000, sid="b"))
-        self.assertEqual(len(self.typed), 3)
+        self.assertEqual(len(self.typed), 4)
         # it fires again once the session has grown by STEP
         to.on_stop(self.hook(to.THRESHOLD + 10000 + to.STEP, sid="b"))
         self.assertEqual(self.typed[-1], "/compress")
