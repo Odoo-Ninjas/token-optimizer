@@ -1,6 +1,6 @@
 # token-optimizer
 
-Hält Claude-Code-Sitzungen unter einer Kontextgrenze (Standard **280k Tokens**),
+Hält Claude-Code-Sitzungen unter einer Kontextgrenze (Standard **250k Tokens**),
 ohne dass der Stand verloren geht. Statt `/compact` (Claude fasst selbst
 zusammen, man weiß nicht genau was) läuft unsere Kette:
 
@@ -17,7 +17,7 @@ Kommandos per `zellij write-chars` in die Kachel getippt; das ist entfallen.
 
 ## Was man sieht
 
-- In der Statuszeile: `token-optimizer: ctx 162k/280k`.
+- In der Statuszeile: `token-optimizer: ctx 162k/250k`.
 - Ab der Grenze startet die Kette von selbst. `/tokopt-chain` startet sie sofort,
   egal wie voll der Kontext ist.
 - Ein gedimmter Vorschlag im Eingabefeld (Tab zum Übernehmen) wird vor
@@ -68,7 +68,7 @@ Claude Code das Plugin direkt aus dem Repo: nach `git pull` reicht
 
 | Option | Standard | |
 |---|---|---|
-| `threshold` | `280000` | Grenze in Tokens |
+| `threshold` | `250000` | Grenze in Tokens |
 | `auto` | `true` | Kette ab der Grenze selbst starten; aus = nur `/tokopt-chain` |
 | `injectNext` | `true` | `NEXT.md` nach `/clear` als Kontext mitgeben |
 

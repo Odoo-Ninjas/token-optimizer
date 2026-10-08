@@ -107,7 +107,7 @@ async function restoreSuggestion($: EngineInterface) {
 
 export const register: Register = (on, options) => {
   const auto = options.auto === true
-  const threshold = Number(options.threshold ?? 280_000)
+  const threshold = Number(options.threshold ?? 250_000)
   const injectNext = options.injectNext === true
 
   on('session.start', async ($, e, next) => {

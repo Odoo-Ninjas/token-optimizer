@@ -14,7 +14,7 @@
       "type": "number",
       "title": "Threshold (tokens)",
       "description": "Context size that starts the chain",
-      "default": 280000
+      "default": 250000
     },
     "injectNext": {
       "type": "boolean",

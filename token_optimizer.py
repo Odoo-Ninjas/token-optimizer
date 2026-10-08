@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """token-optimizer: keep Claude Code sessions below a context budget.
 
-Once the context of a session reaches the threshold (280k tokens by default),
+Once the context of a session reaches the threshold (250k tokens by default),
 the session is handed over to a fresh one without losing anything that
 matters:
 
