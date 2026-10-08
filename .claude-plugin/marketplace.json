@@ -1,0 +1,13 @@
+{
+  "name": "token-optimizer",
+  "owner": {
+    "name": "Zebroo GmbH"
+  },
+  "description": "Zebroo: keep Claude Code sessions below a context budget",
+  "plugins": [
+    {
+      "name": "token-optimizer",
+      "source": "./plugin"
+    }
+  ]
+}

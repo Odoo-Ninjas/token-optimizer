@@ -1,0 +1,26 @@
+{
+  "name": "token-optimizer",
+  "version": "0.2.0",
+  "description": "Hands a session over to a fresh one at a context threshold: /compress, /clear, /whats-next, with NEXT.md carried over",
+  "author": { "name": "Zebroo GmbH" },
+  "userConfig": {
+    "auto": {
+      "type": "boolean",
+      "title": "Auto chain",
+      "description": "Start the chain by itself once the context reaches the threshold (off: only /tokopt-chain)",
+      "default": true
+    },
+    "threshold": {
+      "type": "number",
+      "title": "Threshold (tokens)",
+      "description": "Context size that starts the chain",
+      "default": 250000
+    },
+    "injectNext": {
+      "type": "boolean",
+      "title": "Hand NEXT.md over after /clear",
+      "description": "Give the conversation after /clear the NEXT.md as context",
+      "default": true
+    }
+  }
+}
