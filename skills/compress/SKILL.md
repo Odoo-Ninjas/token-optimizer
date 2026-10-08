@@ -95,10 +95,10 @@ Regeln:
 2. Als letzte Zeile: **`→ Jetzt /clear eingeben.`**
 
 `/clear` ist ein eingebautes CLI-Kommando und kann vom Modell nicht selbst
-ausgeloest werden. Hat token-optimizer (`~/ai/token-optimizer`) dieses
-`/compress` wegen der Kontextgrenze ausgeloest, tippt er `/clear` und danach
-`/whats-next` selbst in die zellij-Kachel - vorausgesetzt, die NEXT.md wurde
-in diesem Zug geschrieben. Sonst tippt der User `/clear`. Nach dem Clear
-bekommt die neue Sitzung die NEXT.md automatisch als Kontext
-(SessionStart-Hook `token_optimizer.py session-start`, Matcher `clear`);
-weiter mit `/go`.
+ausgeloest werden. Hat token-optimizer (`~/ai/token-optimizer`, Plugin
+`token-optimizer`) dieses `/compress` wegen der Kontextgrenze oder per
+`/tokopt-chain` ausgeloest, fuehrt er `/clear` und danach `/whats-next` selbst
+aus - vorausgesetzt, die NEXT.md wurde in diesem Zug geschrieben. Sonst tippt
+der User `/clear`. Nach dem Clear bekommt die neue Sitzung die NEXT.md
+automatisch als Kontext (auch nach einem `/clear` von Hand, dann mit dem
+ersten Prompt); weiter mit `/go`.
