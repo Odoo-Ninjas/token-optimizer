@@ -35,7 +35,7 @@ Kommandos per `zellij write-chars` in die Kachel getippt; das ist entfallen.
 | `.claude-plugin/marketplace.json` | Macht das Repo zum Marketplace `token-optimizer` |
 | `skills/compress` | Skill `/compress`: NEXT.md schreiben |
 | `skills/whats-next` | Skill `/whats-next`: offene Punkte kurz auflisten |
-| `hooks/jev-context-triage.py` | Bewertet große Tool-Ausgaben lokal mit Laya (keep/gist/drop), von `/compress` aufgerufen |
+| `hooks/jev-context-triage.py` | Bewertet große Tool-Ausgaben lokal mit Laya (keep/gist/drop); läuft in der Kette vor `/compress` (Mod bzw. `codex_chain.py`), beim `/compress` von Hand ruft es der Skill auf. Protokoll: `~/.claude/token-optimizer/triage.log` |
 | `token_optimizer.py` | `install` |
 
 ## Installation

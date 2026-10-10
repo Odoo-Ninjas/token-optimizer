@@ -14,7 +14,10 @@ plugin/hooks/register.ts). This script only installs everything:
 
     install    links the skills and the triage script into ~/.claude, removes
                the settings hooks of earlier versions and installs the plugin
-               from this folder (marketplace "token-optimizer")
+               from this folder (marketplace "token-optimizer"); for Codex it
+               links the skills into ~/.codex/skills and registers the Stop
+               hook in ~/.codex/config.toml (chain in codex_chain.py)
+    codex-stop the Codex Stop hook (payload on stdin)
 
 stop, session-start and prompt were the settings hooks of earlier versions.
 They are kept as no-ops so a settings.json that still names them does not
@@ -121,13 +124,75 @@ def install() -> None:
             print(f"{old} moved to backup")
 
     install_plugin()
+    install_codex(backup)
     print(f"backup: {backup}")
+
+
+# --- Codex ---------------------------------------------------------------------
+
+CODEX_BEGIN = "# --- token-optimizer: von `token_optimizer.py install` eingetragen ---"
+CODEX_END = "# --- Ende token-optimizer ---"
+
+
+def codex_hook_block() -> str:
+    # The unversioned python3 survives a Homebrew upgrade; sys.executable
+    # (python3.14 in the Cellar path) does not.
+    py = shutil.which("python3") or sys.executable
+    cmd = f"{py} {ROOT / 'token_optimizer.py'} codex-stop >/dev/null 2>&1 || true"
+    return (f"{CODEX_BEGIN}\n[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\n"
+            f"command = {json.dumps(cmd)}\n{CODEX_END}\n")
+
+
+def with_codex_hook(config: str) -> str:
+    """config.toml with our block (replaced if there, else appended)."""
+    block = codex_hook_block()
+    if CODEX_BEGIN in config and CODEX_END in config:
+        a = config.index(CODEX_BEGIN)
+        b = config.index(CODEX_END) + len(CODEX_END)
+        if config[b:b + 1] == "\n":
+            b += 1
+        return config[:a] + block + config[b:]
+    if config and not config.endswith("\n"):
+        config += "\n"
+    return config + "\n" + block
+
+
+def install_codex(backup: Path) -> None:
+    codex = home() / ".codex"
+    if not codex.is_dir():
+        return
+    for s in SKILLS:
+        dst, src = codex / "skills" / s, ROOT / "skills" / s
+        if dst.is_symlink() and dst.resolve() == src:
+            continue
+        if dst.exists() or dst.is_symlink():
+            shutil.move(str(dst), backup / f"codex-{s}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.symlink_to(src)
+        print(f"{dst} -> {src}")
+    cfg = codex / "config.toml"
+    old = cfg.read_text() if cfg.exists() else ""
+    new = with_codex_hook(old)
+    if new == old:
+        return
+    import tomllib
+    tomllib.loads(new)  # never leave a config.toml Codex cannot read
+    if cfg.exists():
+        shutil.copy2(cfg, backup / "codex-config.toml")
+    cfg.write_text(new)
+    print(f"Codex Stop hook in {cfg} — Codex asks once to trust it (\"New hook — review required\")")
 
 
 def main() -> None:
     args = sys.argv[1:]
     if args == ["install"]:
         install()
+    elif args == ["codex-stop"]:
+        import codex_chain
+        codex_chain.hook_main()
+    elif len(args) == 3 and args[0] == "codex-type":
+        import codex_chain
+        codex_chain.run_steps(args[1], json.loads(args[2]))
     elif len(args) == 1 and args[0] in LEGACY_COMMANDS:
         sys.stdin.read()  # an old settings hook: take its input, do nothing
     else:
