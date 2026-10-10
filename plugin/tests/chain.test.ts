@@ -5,10 +5,13 @@ import type { On } from 'claude-code'
 const TICKET = '/work/ZO-1-ticket'
 const CLEAR = { reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as const
 
+const TABLE = '# Context triage — 2 large tool outputs, ~9k tokens\n\nDroppable: ~4k of ~9k tokens.'
+
 // Stands in for the host: a ticket folder with TASK.md, a NEXT.md whose
-// mtime the test moves, and a log of the slash commands the mod runs.
+// mtime the test moves, a triage run whose result the test sets, and a log
+// of the slash commands the mod runs (with their arguments).
 function host(engine: Engine, on: On) {
-  const state = { ran: [] as string[], nextMtime: 0, toasts: [] as string[], shown: [] as string[], appended: [] as string[], context: [] as string[] }
+  const state = { ran: [] as string[], args: [] as string[], argv: [] as string[], triage: { exitCode: 0, stdout: TABLE, stderr: '' }, nextMtime: 0, toasts: [] as string[], shown: [] as string[], appended: [] as string[], context: [] as string[] }
   on('session.cwd', () => ({ value: `${TICKET}/ZO-1-repo` }))
   on('fs.exists', (_$, e) => ({ value: e.path === `${TICKET}/TASK.md` }))
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: state.nextMtime, isLink: false } }))
@@ -36,8 +39,15 @@ function host(engine: Engine, on: On) {
     return { text: e.text, context: e.context }
   })
   on('fs.read', () => ({ value: '# Next\n\n1. [ ] weiter' }))
+  on('env.get', () => ({ value: '/home/me' }))
+  on('session.id', () => ({ value: 's1' }))
+  on('process.run', (_$, e) => {
+    state.argv = [...e.argv]
+    return { value: { ...state.triage, isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   on('command.run', async (_$, e) => {
     state.ran.push(e.command)
+    state.args.push(e.args)
     if (e.command === 'clear') await engine.session.end(CLEAR) // as the engine's /clear does
     return { text: '' }
   })
@@ -68,6 +78,25 @@ test('chain runs /compress, then /clear and /whats-next once NEXT.md is written'
   await $.turn.complete({ answer: 'NEXT.md geschrieben', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await settle(() => h.ran.length >= 3)
   expect(h.ran).toEqual(['compress', 'clear', 'whats-next'])
+})
+
+test('the Laya triage runs before /compress and its table goes along as arguments', async ($, on) => {
+  const h = host($, on)
+
+  await $.command.run(TYPED)
+  await settle(() => h.ran.length >= 1)
+  expect(h.argv).toEqual(['uv', 'run', '-q', '--script', '/home/me/.claude/hooks/jev-context-triage.py', '--session', 's1'])
+  expect(h.args[0]).toContain('Droppable: ~4k of ~9k tokens.')
+})
+
+test('a failed triage still runs /compress and says why', async ($, on) => {
+  const h = host($, on)
+  h.triage = { exitCode: 2, stdout: 'Laya not reachable or failed (x): Connection refused', stderr: '' }
+
+  await $.command.run(TYPED)
+  await settle(() => h.ran.length >= 1)
+  expect(h.ran).toEqual(['compress'])
+  expect(h.args[0]).toContain('Laya-Triage fehlgeschlagen (Laya not reachable or failed (x): Connection refused)')
 })
 
 test('chain stops without /clear when NEXT.md was not written', async ($, on) => {

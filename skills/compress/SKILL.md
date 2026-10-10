@@ -19,22 +19,30 @@ Der Ordner unter `~/ai/work/...`, in dem die `TASK.md` liegt (ggf. vom cwd aus
 nach oben suchen; Code-Unterordner `ZO-XXXXX-<repo>` ist NICHT der Ort).
 Gibt es keinen Ticket-Ordner: `NEXT.md` ins aktuelle Arbeitsverzeichnis.
 
-## 1b. Jev-Triage (was bleibt, was fliegt)
+## 1b. Laya-Triage (was bleibt, was fliegt) — Pflicht, nicht ueberspringen
 
-Transkript der aktuellen Sitzung: neueste `.jsonl` im Projektordner des
-**Primary working directory** (Pfad mit `/` und `.` durch `-` ersetzt):
+**Schon gelaufen?** Hat token-optimizer dieses `/compress` gestartet, steht
+die Tabelle (oder der Grund, warum es keine gibt) bereits in den Argumenten
+dieses Aufrufs (Claude Code) bzw. in der im Prompt genannten Datei (Codex).
+Dann **nicht erneut** starten, sondern die vorhandene Tabelle nehmen.
+
+Sonst selbst ausfuehren — in Claude Code mit der Session-ID (nicht „neueste
+`.jsonl`": laufen mehrere Sitzungen im selben Ordner, waere das die falsche):
 
 ```bash
-uv run --script ~/.claude/hooks/jev-context-triage.py \
-  "$(ls -t ~/.claude/projects/<slug>/*.jsonl | head -1)"
+uv run -q --script ~/.claude/hooks/jev-context-triage.py --session ${CLAUDE_SESSION_ID}
 ```
+
+In Codex statt `--session` den Pfad der eigenen Rollout-Datei
+(`~/.codex/sessions/JJJJ/MM/TT/rollout-*.jsonl`) uebergeben.
 
 Die Tabelle stuft die grossen Tool-Ausgaben ein: `keep_verbatim` praezise
 uebernehmen (Pfade, Zeilen, Befehle), `keep_gist` auf die relevanten Fakten
 kuerzen, `drop` weglassen. Bewertet wird lokal mit Laya (LaunchAgent
 `de.zebroo.laya`, Port 8781) - es verlaesst nichts den Rechner, daher auch fuer
-DIN-Sitzungen. Scheitert das Skript (z.B. Laya-Dienst laeuft nicht), ohne
-Bewertung weitermachen und das in der Abschlussmeldung erwaehnen.
+DIN-Sitzungen. Exit-Code 2 = Laya nicht erreichbar: dann ohne Bewertung
+weitermachen. Jeder Lauf hinterlaesst eine Zeile in
+`~/.claude/token-optimizer/triage.log`.
 
 ## 2. NEXT.md schreiben / aktualisieren
 
@@ -91,7 +99,8 @@ Regeln:
 ## 3. Abschluss
 
 1. Kurz (max. 5 Zeilen) melden: Pfad der NEXT.md, Anzahl offener Punkte,
-   was `/go` als naechstes nehmen wuerde.
+   was `/go` als naechstes nehmen wuerde, und die Triage in einer Zeile
+   (`Laya: ~Xk von ~Yk droppable` bzw. `Laya: fehlgeschlagen (Grund)`).
 2. Als letzte Zeile: **`→ Jetzt /clear eingeben.`**
 
 `/clear` ist ein eingebautes CLI-Kommando und kann vom Modell nicht selbst

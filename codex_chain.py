@@ -11,6 +11,10 @@ session reaches the threshold, it types into the session's tile through
     /new             -> fresh conversation (Codex' /clear)
     whats-next prompt-> the new conversation lists the open items
 
+Before the compress prompt the detached typer runs the Laya triage
+(hooks/jev-context-triage.py) on the rollout and leaves its table in a file the
+prompt points to, so the rating does not depend on the model running it.
+
 The steps go out one per Stop, like in the mod: /new only once NEXT.md was
 really written in the compress turn. The context size comes from the rollout
 file Codex writes (last `token_count` event).
@@ -34,10 +38,13 @@ STEP = 50_000        # after the chain (or a failed try) wait for this much grow
 STALE = 30 * 60      # a chain stuck this long is dropped
 TYPE_DELAY = 2.0     # let Codex finish the turn before keys arrive
 NEW_SETTLE = 4.0     # /new needs a moment before the composer takes text
+TRIAGE_TIMEOUT = 300  # Laya rates up to 60 outputs in batches
+TRIAGE = Path(__file__).resolve().parent / "hooks" / "jev-context-triage.py"
 
 COMPRESS = ("Kontext ist voll ({k}): Führe jetzt den Skill compress aus — "
             "schreib Stand, offene Punkte, Begründungen und Freigaben in NEXT.md im "
-            "Ticket-Ordner (Anleitung: ~/.codex/skills/compress/SKILL.md). Danach nichts weiter.")
+            "Ticket-Ordner (Anleitung: ~/.codex/skills/compress/SKILL.md). Die Laya-Triage "
+            "ist schon gelaufen, nicht erneut starten: Ergebnis in {triage}. Danach nichts weiter.")
 WHATS_NEXT = ("Weiter nach /new: Führe den Skill whats-next aus "
               "(~/.codex/skills/whats-next/SKILL.md) — lies TASK.md und NEXT.md im Ticket-Ordner "
               "und liste kurz, was ansteht.")
@@ -150,10 +157,34 @@ def spawn(dir: Path, steps: list) -> None:
         )
 
 
+def triage_path(dir: Path) -> Path:
+    return state_path(dir).with_suffix(".triage.md")
+
+
+def run_triage(rollout: str, out: str) -> None:
+    """Rate the rollout with Laya; the table (or why there is none) goes to out."""
+    try:
+        r = subprocess.run(["uv", "run", "-q", "--script", str(TRIAGE), rollout],
+                           capture_output=True, text=True, timeout=TRIAGE_TIMEOUT)
+        if r.returncode == 0 and r.stdout.strip():
+            text = r.stdout.strip()
+        else:
+            lines = (r.stdout.strip() or r.stderr.strip()).splitlines()
+            text = f"Laya-Triage fehlgeschlagen ({lines[-1] if lines else f'exit {r.returncode}'})"
+    except (OSError, subprocess.SubprocessError) as exc:
+        text = f"Laya-Triage fehlgeschlagen ({exc})"
+    Path(out).write_text(text + "\n", encoding="utf-8")
+    log(f"{out}: {text.splitlines()[-1]}")
+
+
 def run_steps(dir: str, steps: list) -> None:
-    """steps: [[raw, text], ...] — one after the other, each via shelltask type."""
+    """steps: [[raw, text], ...] — one after the other, each via shelltask type.
+    A step ["triage", rollout, out] runs the Laya triage instead of typing."""
     time.sleep(TYPE_DELAY)
-    for i, (raw, text) in enumerate(steps):
+    for i, (raw, text, *rest) in enumerate(steps):
+        if raw == "triage":
+            run_triage(text, rest[0])
+            continue
         if i:
             time.sleep(NEW_SETTLE)
         cmd = [shelltask(), "type", *(["--raw"] if raw else []), dir, "--", text]
@@ -197,7 +228,9 @@ def on_stop(data: dict, typer=spawn) -> str:
 
     limit = threshold()
     if tokens >= limit and (not base or tokens >= base + STEP):
-        typer(task, [[False, COMPRESS.format(k=f"{tokens // 1000}k/{limit // 1000}k")]])
+        out = triage_path(task)
+        typer(task, [["triage", str(rollout), str(out)],
+                     [False, COMPRESS.format(k=f"{tokens // 1000}k/{limit // 1000}k", triage=out)]])
         save_state(task, phase="compress", base=base, next_mtime=mtime(nxt))
         log(f"{task}: context {tokens} >= {limit}, compress")
         return "compress"

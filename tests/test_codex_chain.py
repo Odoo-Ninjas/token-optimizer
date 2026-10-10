@@ -43,7 +43,10 @@ class Chain(unittest.TestCase):
 
     def test_full_chain(self):
         self.assertEqual(self.stop(), "compress")
-        self.assertIn("compress", self.typed[0][0][1])
+        triage, prompt = self.typed[0]
+        self.assertEqual(triage[:2], ["triage", self.data["transcript_path"]])
+        self.assertIn("compress", prompt[1])
+        self.assertIn(triage[2], prompt[1])
         (self.task / "NEXT.md").write_text("# Next\n")
         os.utime(self.task / "NEXT.md", (9e9, 9e9))
         self.assertEqual(self.stop(), "new")
@@ -63,6 +66,21 @@ class Chain(unittest.TestCase):
     def test_outside_zellij(self):
         del os.environ["ZELLIJ_SESSION_NAME"]
         self.assertEqual(self.stop(), "not in zellij")
+
+
+class Triage(unittest.TestCase):
+    def test_table_or_failure_lands_in_file(self):
+        tmp = Path(tempfile.mkdtemp())
+        out = tmp / "t.triage.md"
+        ok = mock.Mock(returncode=0, stdout="# Context triage\n\nDroppable: ~1k of ~2k tokens.\n", stderr="")
+        with mock.patch.dict(os.environ, {"HOME": str(tmp)}), mock.patch("subprocess.run", return_value=ok):
+            codex_chain.run_triage("r.jsonl", str(out))
+        self.assertIn("Droppable", out.read_text())
+        bad = mock.Mock(returncode=2, stdout="Laya not reachable or failed (x): refused\n", stderr="")
+        with mock.patch.dict(os.environ, {"HOME": str(tmp)}), mock.patch("subprocess.run", return_value=bad):
+            codex_chain.run_triage("r.jsonl", str(out))
+        self.assertIn("fehlgeschlagen", out.read_text())
+        self.assertIn("refused", out.read_text())
 
 
 class HookBlock(unittest.TestCase):
