@@ -1,3 +1,4 @@
+// Part of Zebroo GmbH. See LICENSE file for full copyright and licensing details (www.zebroo.de/license).
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'

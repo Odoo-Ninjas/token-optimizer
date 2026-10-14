@@ -1,3 +1,4 @@
+# Part of Zebroo GmbH. See LICENSE file for full copyright and licensing details (www.zebroo.de/license).
 """The token-optimizer chain for Codex CLI.
 
 Claude Code runs the chain in a mod (plugin/). Codex has no mods, but it has

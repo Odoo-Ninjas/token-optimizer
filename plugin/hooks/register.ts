@@ -1,3 +1,4 @@
+// Part of Zebroo GmbH. See LICENSE file for full copyright and licensing details (www.zebroo.de/license).
 import type { EngineInterface, Register } from 'claude-code'
 
 // token-optimizer as a mod: once the context reaches the threshold, the

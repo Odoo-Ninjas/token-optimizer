@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Part of Zebroo GmbH. See LICENSE file for full copyright and licensing details (www.zebroo.de/license).
 """token-optimizer: keep Claude Code sessions below a context budget.
 
 Once the context of a session reaches the threshold (250k tokens by default),
