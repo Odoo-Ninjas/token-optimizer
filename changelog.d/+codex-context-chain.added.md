@@ -1,0 +1,1 @@
+Codex-Sitzungen in Shelltask erhalten eine Stop-Hook-Kette für die Übergabe über NEXT.md, /new und den whats-next-Skill. Installation und Regressionstests sichern die Hook-Konfiguration und lokale Zustellung ab.
