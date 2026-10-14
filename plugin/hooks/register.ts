@@ -1,3 +1,4 @@
+// Part of Zebroo GmbH. See LICENSE file for full copyright and licensing details (www.zebroo.de/license).
 import type { EngineInterface, Register } from 'claude-code'
 
 // token-optimizer as a mod: once the context reaches the threshold, the
@@ -9,6 +10,7 @@ import type { EngineInterface, Register } from 'claude-code'
 const STEP = 50_000 // no new auto start until the context grew this much
 const STALE_MS = 30 * 60_000 // a chain stuck this long is dropped
 const RESTORE_MS = 1_500 // wait for the engine's own suggestion before ours
+const TRIAGE_MS = 5 * 60_000 // Laya rates up to 60 outputs in batches
 
 type Phase = 'idle' | 'compress' | 'clear' | 'whatsnext'
 
@@ -58,6 +60,27 @@ async function nextNote($: EngineInterface) {
   return text.trim() ? `NEXT.md (${path}), written before /clear:\n\n${text}` : ''
 }
 
+// The triage table for /compress, or a line saying why there is none.
+async function triage($: EngineInterface) {
+  const script = `${await $.env.get('HOME')}/.claude/hooks/jev-context-triage.py`
+  const session = await $.session.id()
+  $.ui.status('Laya-Triage …')
+  try {
+    const r = await $.process.run(['uv', 'run', '-q', '--script', script, '--session', session], { timeoutMs: TRIAGE_MS })
+    const out = r.stdout.trim()
+    if (r.exitCode === 0 && out) {
+      $.ui.log(`triage: ${out.split('\n').find(l => l.startsWith('Droppable')) ?? 'nothing to judge'}`)
+      return `Laya-Triage (vom token-optimizer vor /compress ausgeführt, nicht erneut starten):\n\n${out}`
+    }
+    const why = (out || r.stderr.trim()).split('\n').pop() || `exit ${r.exitCode}`
+    $.ui.log(`triage failed: ${why}`)
+    return `Laya-Triage fehlgeschlagen (${why}) - nicht erneut starten, in der Abschlussmeldung erwähnen.`
+  } catch (err) {
+    $.ui.log(`triage failed: ${err}`)
+    return `Laya-Triage fehlgeschlagen (${err}) - nicht erneut starten, in der Abschlussmeldung erwähnen.`
+  }
+}
+
 async function startChain($: EngineInterface) {
   if (chain.phase !== 'idle') return
   chain.nextPath = await findNext($)
@@ -70,7 +93,9 @@ async function startChain($: EngineInterface) {
   $.ui.status('/compress …')
   $.ui.log(`start at ${k(chain.tokens)}, NEXT.md = ${chain.nextPath}` +
     (chain.restore ? `, suggestion kept: ${chain.restore}` : ''))
-  void $.command.run({ command: 'compress' }).catch(err => reset($, `/compress failed: ${err}`))
+  const args = await triage($)
+  $.ui.status('/compress …')
+  void $.command.run({ command: 'compress', args }).catch(err => reset($, `/compress failed: ${err}`))
 }
 
 async function finishChain($: EngineInterface) {

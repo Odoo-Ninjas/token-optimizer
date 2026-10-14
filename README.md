@@ -35,7 +35,7 @@ Kommandos per `zellij write-chars` in die Kachel getippt; das ist entfallen.
 | `.claude-plugin/marketplace.json` | Macht das Repo zum Marketplace `token-optimizer` |
 | `skills/compress` | Skill `/compress`: NEXT.md schreiben |
 | `skills/whats-next` | Skill `/whats-next`: offene Punkte kurz auflisten |
-| `hooks/jev-context-triage.py` | Bewertet große Tool-Ausgaben lokal mit Laya (keep/gist/drop), von `/compress` aufgerufen |
+| `hooks/jev-context-triage.py` | Bewertet große Tool-Ausgaben lokal mit Laya (keep/gist/drop); läuft in der Kette vor `/compress` (Mod bzw. `codex_chain.py`), beim `/compress` von Hand ruft es der Skill auf. Protokoll: `~/.claude/token-optimizer/triage.log` |
 | `token_optimizer.py` | `install` |
 
 ## Installation
@@ -90,8 +90,12 @@ Die früheren Umgebungsvariablen `TOKEN_OPTIMIZER_*` gibt es nicht mehr.
 
 ```bash
 claude plugin test plugin           # der Mod
-python3 -m unittest discover -s tests  # install
+python3.11 -m unittest discover -s tests  # Python 3.11+ (tomllib)
 ```
 
 Typprüfung des Mods: Claude Code legt die Typen beim Laden nach
 `plugin/.claude-plugin/types/` (nicht eingecheckt), danach `npx -p typescript@5 tsc -p plugin`.
+
+## Codex-Sitzungen
+
+`codex_chain.py` führt die Kontextübergabe in einer lokalen Shelltask-/zellij-Sitzung über den Codex-Stop-Hook aus: Stand in NEXT.md schreiben, `/new` starten und den whats-next-Skill anfordern. `token_optimizer.py codex-stop` verarbeitet den Hook, `codex-type` stellt Text über den lokalen Shelltask-Weg zu. Außerhalb einer Shelltask-/zellij-Sitzung wird die Kette nicht in andere Codex-Fenster getippt. Der Installationsbefehl verlinkt die Skills und trägt die Hook-Konfiguration ein; Tests laufen lokal mit Python 3.11 oder neuer.
